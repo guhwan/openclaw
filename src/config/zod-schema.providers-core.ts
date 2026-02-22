@@ -160,6 +160,7 @@ export const TelegramAccountSchemaBase = z
     network: z
       .object({
         autoSelectFamily: z.boolean().optional(),
+        forceCurl: z.boolean().optional(),
       })
       .strict()
       .optional(),
