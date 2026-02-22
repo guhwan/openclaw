@@ -82,27 +82,6 @@ function parseCurlHttpResponse(raw: Buffer): HeaderParseResult {
   };
 }
 
-function normalizeCurlBody(
-  body: BodyInit | null | undefined,
-): string | Uint8Array | null | undefined {
-  if (body == null) {
-    return undefined;
-  }
-  if (typeof body === "string") {
-    return body;
-  }
-  if (body instanceof URLSearchParams) {
-    return body.toString();
-  }
-  if (body instanceof Uint8Array) {
-    return body;
-  }
-  if (body instanceof ArrayBuffer) {
-    return new Uint8Array(body);
-  }
-  return body;
-}
-
 export function createTelegramCurlFetch(options: CurlFetchOptions = {}): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -119,8 +98,7 @@ export function createTelegramCurlFetch(options: CurlFetchOptions = {}): typeof 
       args.push("--header", `${key}: ${value}`);
     });
 
-    const normalizedBody = normalizeCurlBody(request.body as BodyInit | null | undefined);
-    const hasBody = method !== "GET" && method !== "HEAD" && normalizedBody != null;
+    const hasBody = method !== "GET" && method !== "HEAD" && request.body !== null;
     if (hasBody) {
       args.push("--data-binary", "@-");
     }
@@ -175,8 +153,9 @@ export function createTelegramCurlFetch(options: CurlFetchOptions = {}): typeof 
           return;
         }
         const parsed = parseCurlHttpResponse(Buffer.concat(stdoutChunks));
+        const responseBody = Uint8Array.from(parsed.body).buffer;
         resolve(
-          new Response(parsed.body, {
+          new Response(new Blob([responseBody]), {
             status: parsed.status,
             statusText: parsed.statusText,
             headers: parsed.headers,
@@ -185,23 +164,17 @@ export function createTelegramCurlFetch(options: CurlFetchOptions = {}): typeof 
       });
 
       if (hasBody) {
-        if (typeof normalizedBody === "string") {
-          child.stdin.end(normalizedBody);
-        } else if (normalizedBody instanceof Uint8Array) {
-          child.stdin.end(Buffer.from(normalizedBody));
-        } else {
-          request
-            .arrayBuffer()
-            .then((body) => child.stdin.end(Buffer.from(body)))
-            .catch((err) => {
-              if (!settled) {
-                settled = true;
-                request.signal.removeEventListener("abort", abort);
-                child.kill("SIGTERM");
-                reject(err);
-              }
-            });
-        }
+        request
+          .arrayBuffer()
+          .then((body) => child.stdin.end(Buffer.from(body)))
+          .catch((err) => {
+            if (!settled) {
+              settled = true;
+              request.signal.removeEventListener("abort", abort);
+              child.kill("SIGTERM");
+              reject(err);
+            }
+          });
       } else {
         child.stdin.end();
       }
