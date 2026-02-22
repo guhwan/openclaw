@@ -20,6 +20,9 @@ const { makeProxyFetch } = vi.hoisted(() => ({
 const { resolveTelegramFetch } = vi.hoisted(() => ({
   resolveTelegramFetch: vi.fn(),
 }));
+const { createTelegramCurlFetch } = vi.hoisted(() => ({
+  createTelegramCurlFetch: vi.fn(),
+}));
 
 vi.mock("../config/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config/config.js")>();
@@ -35,6 +38,9 @@ vi.mock("./proxy.js", () => ({
 
 vi.mock("./fetch.js", () => ({
   resolveTelegramFetch,
+}));
+vi.mock("./curl-fetch.js", () => ({
+  createTelegramCurlFetch,
 }));
 
 vi.mock("grammy", () => ({
@@ -85,6 +91,7 @@ describe("telegram proxy client", () => {
     });
     makeProxyFetch.mockReset();
     resolveTelegramFetch.mockReset();
+    createTelegramCurlFetch.mockReset();
   });
 
   it("uses proxy fetch for sendMessage", async () => {
@@ -109,5 +116,38 @@ describe("telegram proxy client", () => {
     await deleteMessageTelegram("123", "456", { token: "tok", accountId: "foo" });
 
     expectProxyClient(fetchImpl);
+  });
+
+  it("uses curl transport when network.forceCurl is enabled", async () => {
+    const { fetchImpl } = prepareProxyFetch();
+    const curlFetch = vi.fn();
+    createTelegramCurlFetch.mockReturnValue(curlFetch as unknown as typeof fetch);
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          accounts: {
+            foo: {
+              proxy: proxyUrl,
+              network: { forceCurl: true },
+            },
+          },
+        },
+      },
+    });
+
+    await sendMessageTelegram("123", "hi", { token: "tok", accountId: "foo" });
+
+    expect(makeProxyFetch).toHaveBeenCalledWith(proxyUrl);
+    expect(resolveTelegramFetch).toHaveBeenCalledWith(expect.any(Function), {
+      network: { forceCurl: true },
+    });
+    expect(createTelegramCurlFetch).toHaveBeenCalledWith({ proxyUrl });
+    expect(botCtorSpy).toHaveBeenCalledWith(
+      "tok",
+      expect.objectContaining({
+        client: expect.objectContaining({ fetch: curlFetch }),
+      }),
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
