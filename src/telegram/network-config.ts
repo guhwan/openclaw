@@ -1,12 +1,14 @@
 import process from "node:process";
 import type { TelegramNetworkConfig } from "../config/types.telegram.js";
 import { isTruthyEnvValue } from "../infra/env.js";
+import { isWSL2Sync } from "../infra/wsl.js";
 
 export const TELEGRAM_DISABLE_AUTO_SELECT_FAMILY_ENV =
   "OPENCLAW_TELEGRAM_DISABLE_AUTO_SELECT_FAMILY";
 export const TELEGRAM_ENABLE_AUTO_SELECT_FAMILY_ENV = "OPENCLAW_TELEGRAM_ENABLE_AUTO_SELECT_FAMILY";
 export const TELEGRAM_FORCE_CURL_ENV = "OPENCLAW_TELEGRAM_FORCE_CURL";
 export const TELEGRAM_DISABLE_CURL_ENV = "OPENCLAW_TELEGRAM_DISABLE_CURL";
+export const TELEGRAM_DNS_RESULT_ORDER_ENV = "OPENCLAW_TELEGRAM_DNS_RESULT_ORDER";
 
 export type TelegramAutoSelectFamilyDecision = {
   value: boolean | null;
@@ -17,6 +19,21 @@ export type TelegramForceCurlDecision = {
   value: boolean;
   source: string;
 };
+
+export type TelegramDnsResultOrderDecision = {
+  value: string | null;
+  source?: string;
+};
+
+let wsl2SyncCache: boolean | undefined;
+
+function isWSL2SyncCached(): boolean {
+  if (typeof wsl2SyncCache === "boolean") {
+    return wsl2SyncCache;
+  }
+  wsl2SyncCache = isWSL2Sync();
+  return wsl2SyncCache;
+}
 
 export function resolveTelegramAutoSelectFamilyDecision(params?: {
   network?: TelegramNetworkConfig;
@@ -37,6 +54,10 @@ export function resolveTelegramAutoSelectFamilyDecision(params?: {
   }
   if (typeof params?.network?.autoSelectFamily === "boolean") {
     return { value: params.network.autoSelectFamily, source: "config" };
+  }
+  // WSL2 has unstable IPv6 connectivity; disable autoSelectFamily to use IPv4 directly
+  if (isWSL2SyncCached()) {
+    return { value: false, source: "default-wsl2" };
   }
   if (Number.isFinite(nodeMajor) && nodeMajor >= 22) {
     return { value: true, source: "default-node22" };
@@ -59,4 +80,48 @@ export function resolveTelegramForceCurlDecision(params?: {
     return { value: params.network.forceCurl, source: "config" };
   }
   return { value: false, source: "default" };
+}
+
+/**
+ * Resolve DNS result order setting for Telegram network requests.
+ * Some networks/ISPs have issues with IPv6 causing fetch failures.
+ * Setting "ipv4first" prioritizes IPv4 addresses in DNS resolution.
+ *
+ * Priority:
+ * 1. Environment variable OPENCLAW_TELEGRAM_DNS_RESULT_ORDER
+ * 2. Config: channels.telegram.network.dnsResultOrder
+ * 3. Default: "ipv4first" on Node 22+ (to work around common IPv6 issues)
+ */
+export function resolveTelegramDnsResultOrderDecision(params?: {
+  network?: TelegramNetworkConfig;
+  env?: NodeJS.ProcessEnv;
+  nodeMajor?: number;
+}): TelegramDnsResultOrderDecision {
+  const env = params?.env ?? process.env;
+  const nodeMajor =
+    typeof params?.nodeMajor === "number"
+      ? params.nodeMajor
+      : Number(process.versions.node.split(".")[0]);
+
+  const envValue = env[TELEGRAM_DNS_RESULT_ORDER_ENV]?.trim().toLowerCase();
+  if (envValue === "ipv4first" || envValue === "verbatim") {
+    return { value: envValue, source: `env:${TELEGRAM_DNS_RESULT_ORDER_ENV}` };
+  }
+
+  const configValue = (params?.network as { dnsResultOrder?: string } | undefined)?.dnsResultOrder
+    ?.trim()
+    .toLowerCase();
+  if (configValue === "ipv4first" || configValue === "verbatim") {
+    return { value: configValue, source: "config" };
+  }
+
+  if (Number.isFinite(nodeMajor) && nodeMajor >= 22) {
+    return { value: "ipv4first", source: "default-node22" };
+  }
+
+  return { value: null };
+}
+
+export function resetTelegramNetworkConfigStateForTests(): void {
+  wsl2SyncCache = undefined;
 }

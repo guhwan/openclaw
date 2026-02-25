@@ -27,6 +27,12 @@ export type TelegramNetworkConfig = {
   autoSelectFamily?: boolean;
   /** Force Telegram outbound HTTP transport through curl. */
   forceCurl?: boolean;
+  /**
+   * DNS result order for network requests ("ipv4first" | "verbatim").
+   * Set to "ipv4first" to prioritize IPv4 addresses and work around IPv6 issues.
+   * Default: "ipv4first" on Node 22+ to avoid common fetch failures.
+   */
+  dnsResultOrder?: "ipv4first" | "verbatim";
 };
 
 export type TelegramInlineButtonsScope = "off" | "dm" | "group" | "all" | "allowlist";
@@ -129,6 +135,8 @@ export type TelegramAccountConfig = {
   webhookPath?: string;
   /** Local webhook listener bind host (default: 127.0.0.1). */
   webhookHost?: string;
+  /** Local webhook listener bind port (default: 8787). */
+  webhookPort?: number;
   /** Per-action tool gating (default: true for all). */
   actions?: TelegramActionConfig;
   /**
